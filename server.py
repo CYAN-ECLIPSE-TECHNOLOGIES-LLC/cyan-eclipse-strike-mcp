@@ -213,41 +213,36 @@ def t_receipt_list(state, args):
             "chain_valid": eng.verify_receipt_chain(state["receipts"])}
 
 
+_P_INSTRUMENT = {"type": "string", "description": "Canonical instrument id as returned by product_list, for a Coinbase spot product. Must belong to the Coinbase venue; other venues' ids fail with PRODUCT_NOT_FOUND."}
+_P_AS_OF = {"type": "string", "description": "Optional ISO-8601 timestamp used for fee-schedule freshness evaluation, e.g. '2026-10-25T13:00:00Z'. Omit to evaluate against the fixture clock."}
+
 TOOLS = {
     "product_list": (
         t_product_list,
-        "T0. Coinbase spot products as canonical Instruments "
-        "(status + native status preserved; unmapped native "
-        "statuses surface as UNMAPPED, spec 5.2). Public data "
-        "only — no account surface exists in this build.",
+        "List Coinbase spot products as canonical Instruments, with mapped status and the native Coinbase status preserved (a native status with no mapping surfaces as UNMAPPED, never coerced). Use this first to discover instrument_id values for product_get, book_get, and quote_get. Behaviour: read-only over fixture data shaped like the Coinbase public market-data API; no network calls, no account, no API key — no account surface (balances, orders, transfers) exists in this build at all. Returns {products: [{instrument_id, title, status, native_status, money_class}], count}.",
         {}, []),
     "product_get": (
         t_product_get,
-        "T0. One product as a canonical Instrument.",
-        {"instrument_id": {"type": "string"}}, ["instrument_id"]),
+        "Fetch one Coinbase spot product as a full canonical Instrument (tick, minimum size, currency, status mapping, provenance). Use this for one product's exact terms; use product_list to browse or discover ids, and book_get for order-book depth. Behaviour: read-only, fixture data only, no auth. Returns {product: <instrument>}; an unknown or non-Coinbase instrument_id fails with PRODUCT_NOT_FOUND.",
+        {"instrument_id": _P_INSTRUMENT}, ["instrument_id"]),
     "book_get": (
         t_book_get,
-        "T0. The canonical Book for a product: levels, computed "
-        "spread, depth summary.",
-        {"instrument_id": {"type": "string"}}, ["instrument_id"]),
+        "Fetch the canonical order book for one Coinbase spot product: bid/ask levels, computed spread, and a depth summary. Use this to judge liquidity and spread; use quote_get instead when you need the all-in cost at a specific size. Behaviour: read-only, fixture data only, no auth. Returns {book: <levels, spread, depth summary>}.",
+        {"instrument_id": _P_INSTRUMENT}, ["instrument_id"]),
     "quote_get": (
         t_quote_get,
-        "T0. Core Quote at a stated size: bid/ask/computed mid "
-        "+ all-in cost from the venue's dated fee schedule + "
-        "liquidity flag. Stale schedule -> FEE_UNVERIFIED.",
-        {"instrument_id": {"type": "string"},
-         "size": {"type": "string"}, "as_of": {"type": "string"}},
+        "Price one Coinbase spot product at a stated size: bid/ask, computed mid, all-in cost taken from the venue's dated fee schedule, and a liquidity flag. Use this for a size-aware executable price; use book_get for raw levels. If the fee schedule is stale at the evaluation time the quote reports FEE_UNVERIFIED instead of inventing a fee. Behaviour: read-only, fixture data only, no auth, and no order is placed — this server has no trading tools. Returns {quote: <bid/ask/mid, all-in cost, liquidity flag>}.",
+        {"instrument_id": _P_INSTRUMENT,
+         "size": {"type": "string", "description": "Size to price, as a decimal string in base-currency units, e.g. '0.5'. Required; the quote walks the book to this size, so larger sizes can change the price and liquidity flag."}, "as_of": _P_AS_OF},
         ["instrument_id", "size"]),
     "venue_status": (
         t_venue_status,
-        "T0. Adapter health + the standing capability record: "
-        "account_surface ABSENT at M0 (wrap is M1+).",
-        {"as_of": {"type": "string"}}, []),
+        "Report this Coinbase adapter's health plus its standing capability record, including account_surface = ABSENT in this build (account access is a future governed wrap, not part of this server). Use this to confirm what this build can and cannot do before relying on its data; it returns no product data — use product_list for that. Behaviour: read-only, no auth. Returns the venue status object extended with transport ('fixtures (Coinbase public-data shaped); live public reads not_tested in M0') and the account_surface statement.",
+        {"as_of": _P_AS_OF}, []),
     "receipt_list": (
         t_receipt_list,
-        "T0. The shared suite ledger (hash-chained) as this "
-        "adapter sees it.",
-        {"limit": {"type": "integer"}}, []),
+        "List receipts from the shared Eclipse Book suite ledger (hash-chained) as this adapter sees it, with a chain-validity check. Use this to audit what the shared core state recorded across adapters; it is not market data — use product_list or book_get for that. Behaviour: read-only, no auth. Returns {receipts: [...], count: <total receipts in ledger>, chain_valid: <bool>}; when limit is given, receipts holds only the most recent entries while count still reports the full total.",
+        {"limit": {"type": "integer", "description": "Optional maximum number of most-recent receipts to return, e.g. 10. Omit to return the entire ledger."}}, []),
 }
 
 # Capability denylist, stated in code (spec 10.1): NO account
